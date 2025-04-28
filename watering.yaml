@@ -28,14 +28,16 @@ wifi:
 
 captive_portal:
 
+############
 
-# LED on GPIO2 - always ON and not directly controllable
+# LED on GPIO2 - configured as status LED
 output:
   - platform: gpio
     pin:
       number: GPIO2
       inverted: true
     id: led_output
+
 
 
 # Relay on GPIO0 with inverted logic
@@ -47,3 +49,25 @@ switch:
       inverted: true
     id: relay
     restore_mode: ALWAYS_OFF
+
+
+# Standard sensors for monitoring device health
+sensor:
+  # WiFi signal strength sensor
+  - platform: wifi_signal
+    name: "WiFi Signal"
+    update_interval: 60s
+    entity_category: "diagnostic"
+  
+  # Uptime sensor
+  - platform: uptime
+    name: "Uptime"
+    update_interval: 60s
+    entity_category: "diagnostic"
+  
+
+# System monitoring and control
+button:
+  - platform: restart
+    name: "Restart"
+    entity_category: "config"
