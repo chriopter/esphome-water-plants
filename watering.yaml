@@ -1,6 +1,23 @@
 esphome:
   name: bewasserung-balkon
   friendly_name: Bewässerung Balkon
+  on_boot:
+    priority: 600
+    then:
+      - switch.turn_off: relay  # Ensure pump is off after boot
+      - lambda: |-
+          // Initialize morning time text field from saved values
+          char morning_time[6];
+          sprintf(morning_time, "%02d:%02d", id(morning_hour), id(morning_minute));
+          id(morning_time_text).publish_state(morning_time);
+          
+          // Initialize evening time text field from saved values
+          char evening_time[6];
+          sprintf(evening_time, "%02d:%02d", id(evening_hour), id(evening_minute));
+          id(evening_time_text).publish_state(evening_time);
+          
+          ESP_LOGI("watering", "Initialized time fields: Morning %s, Evening %s", 
+                   morning_time, evening_time);
 
 esp8266:
   board: esp01_1m
@@ -38,20 +55,239 @@ output:
       inverted: true
     id: led_output
 
+# System monitoring and control
+button:
+  - platform: restart
+    name: "Restart"
+    entity_category: "config"
+  # Manual watering button
+  - platform: template
+    name: "Start Manual Watering"
+    on_press:
+      then:
+        - script.execute: start_watering
+  # Stop watering button
+  - platform: template
+    name: "Stop Watering"
+    icon: "mdi:stop"
+    on_press:
+      then:
+        - lambda: |-
+            // Signal the watering script to stop by setting the flag
+            id(should_stop_watering) = true;
+            // Also immediately update state to allow manual restart
+            id(is_watering) = false;
+            id(watering_end_time) = 0;
+            ESP_LOGD("watering", "Watering stopped manually");
+        - switch.turn_off: relay
 
+# Watering configuration
+# Global variables to persist settings between reboots
+globals:
+  # Watering duration in minutes
+  - id: watering_duration
+    type: float
+    restore_value: true
+    initial_value: '5.0'
+  # Morning watering time
+  - id: morning_hour
+    type: int
+    restore_value: true
+    initial_value: '7'
+  - id: morning_minute
+    type: int
+    restore_value: true
+    initial_value: '0'
+  # Evening watering time
+  - id: evening_hour
+    type: int
+    restore_value: true
+    initial_value: '19'
+  - id: evening_minute
+    type: int
+    restore_value: true
+    initial_value: '0'
+  # Schedule enable flags
+  - id: morning_enabled
+    type: bool
+    restore_value: true
+    initial_value: 'true'
+  - id: evening_enabled
+    type: bool
+    restore_value: true
+    initial_value: 'true'
+  # Currently watering flag and remaining time
+  - id: is_watering
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  - id: watering_end_time
+    type: int
+    restore_value: false
+    initial_value: '0'
+  - id: should_stop_watering
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  # Absolute maximum watering time (safety feature)
+  - id: max_watering_timeout
+    type: int
+    restore_value: false
+    initial_value: '600'  # 10 minutes absolute maximum
 
-# Relay on GPIO0 with inverted logic
+# Time inputs for scheduling (using number components)
+number:
+  - platform: template
+    name: "Watering Duration"
+    id: duration_slider
+    optimistic: true
+    min_value: 1
+    max_value: 30
+    step: 1
+    unit_of_measurement: "min"
+    icon: "mdi:timer"
+    restore_value: true
+    initial_value: 5
+    set_action:
+      then:
+        - globals.set:
+            id: watering_duration
+            value: !lambda 'return x;'
+            
+
+# Text inputs for direct time entry
+text:
+  - platform: template
+    name: "Morning Watering Time"
+    id: morning_time_text
+    optimistic: true
+    icon: "mdi:clock-time-eight"
+    restore_value: true
+    initial_value: "07:00"
+    min_length: 5
+    max_length: 5
+    mode: text
+    pattern: "^([01]?[0-9]|2[0-3]):[0-5][0-9]$"  # HH:MM format validation
+    on_value:
+      then:
+        - lambda: |-
+            std::string time_str = id(morning_time_text).state;
+            if (time_str.length() == 5 && time_str[2] == ':') {
+              int hour = atoi(time_str.substr(0, 2).c_str());
+              int minute = atoi(time_str.substr(3, 2).c_str());
+              
+              if (hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59) {
+                id(morning_hour) = hour;
+                id(morning_minute) = minute;
+                ESP_LOGD("watering", "Morning time set to %02d:%02d", hour, minute);
+              }
+            }
+
+  - platform: template
+    name: "Evening Watering Time"
+    id: evening_time_text
+    optimistic: true
+    icon: "mdi:clock-time-six"
+    restore_value: true
+    initial_value: "19:00"
+    min_length: 5
+    max_length: 5
+    mode: text
+    pattern: "^([01]?[0-9]|2[0-3]):[0-5][0-9]$"  # HH:MM format validation
+    on_value:
+      then:
+        - lambda: |-
+            std::string time_str = id(evening_time_text).state;
+            if (time_str.length() == 5 && time_str[2] == ':') {
+              int hour = atoi(time_str.substr(0, 2).c_str());
+              int minute = atoi(time_str.substr(3, 2).c_str());
+              
+              if (hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59) {
+                id(evening_hour) = hour;
+                id(evening_minute) = minute;
+                ESP_LOGD("watering", "Evening time set to %02d:%02d", hour, minute);
+              }
+            }
+
+# Time configuration - using Home Assistant as time source
+time:
+  - platform: homeassistant
+    id: esptime
+    timezone: Europe/Berlin
+    on_time_sync:
+      # Update the next watering time immediately when time becomes available
+      then:
+        - logger.log: "Time synchronized, updating watering schedule displays"
+        - component.update: next_watering
+    on_time:
+      # Check every minute if watering should start
+      - seconds: 0
+        minutes: /1
+        then:
+          - lambda: |-
+              auto time = id(esptime).now();
+              if (time.is_valid()) {
+                int now_hour = time.hour;
+                int now_minute = time.minute;
+                
+                // Check morning schedule
+                if (id(morning_enabled) && now_hour == id(morning_hour) && now_minute == id(morning_minute) && !id(is_watering)) {
+                  ESP_LOGD("watering", "Starting morning watering");
+                  id(start_watering).execute();
+                }
+                
+                // Check evening schedule
+                if (id(evening_enabled) && now_hour == id(evening_hour) && now_minute == id(evening_minute) && !id(is_watering)) {
+                  ESP_LOGD("watering", "Starting evening watering");
+                  id(start_watering).execute();
+                }
+              }
+
+# Schedule enable switches
 switch:
   - platform: gpio
-    name: "Pump"
+    name: "Pump State"
     pin:
       number: GPIO0
       inverted: true
     id: relay
     restore_mode: ALWAYS_OFF
+    entity_category: "diagnostic"
+    icon: "mdi:water-pump"
 
+  - platform: template
+    name: "Morning Watering Enabled"
+    id: morning_switch
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    turn_on_action:
+      - globals.set:
+          id: morning_enabled
+          value: 'true'
+    turn_off_action:
+      - globals.set:
+          id: morning_enabled
+          value: 'false'
+    lambda: |-
+      return id(morning_enabled);
 
-# Standard sensors for monitoring device health
+  - platform: template
+    name: "Evening Watering Enabled"
+    id: evening_switch
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    turn_on_action:
+      - globals.set:
+          id: evening_enabled
+          value: 'true'
+    turn_off_action:
+      - globals.set:
+          id: evening_enabled
+          value: 'false'
+    lambda: |-
+      return id(evening_enabled);
+
+# Status sensor
 sensor:
   # WiFi signal strength sensor
   - platform: wifi_signal
@@ -64,10 +300,151 @@ sensor:
     name: "Uptime"
     update_interval: 60s
     entity_category: "diagnostic"
-  
+    
+  # Watering remaining time
+  - platform: template
+    name: "Watering Remaining Time"
+    id: remaining_time
+    unit_of_measurement: "min"
+    icon: "mdi:timer-outline"
+    update_interval: 10s
+    lambda: |-
+      if (!id(is_watering)) {
+        return 0;
+      }
+      int remaining_seconds = id(watering_end_time) - millis()/1000;
+      if (remaining_seconds <= 0) {
+        return 0;
+      }
+      return remaining_seconds / 60.0;
 
-# System monitoring and control
-button:
-  - platform: restart
-    name: "Restart"
-    entity_category: "config"
+# Text sensor for next watering time
+text_sensor:
+  - platform: template
+    name: "Next Scheduled Watering"
+    id: next_watering
+    update_interval: 10s
+    lambda: |-
+      auto now = id(esptime).now();
+      if (!now.is_valid()) {
+        return std::string("Unknown - time not set");
+      }
+      
+      // Convert all times to minutes-since-midnight for easier comparison
+      int now_minutes = now.hour * 60 + now.minute;
+      int timer1_minutes = id(morning_hour) * 60 + id(morning_minute);
+      int timer2_minutes = id(evening_hour) * 60 + id(evening_minute);
+      
+      // Calculate minutes until next watering for both timers
+      int minutes_until_timer1 = timer1_minutes - now_minutes;
+      if (minutes_until_timer1 <= 0) {
+        minutes_until_timer1 += 24 * 60; // Add a day if it's already passed
+      }
+      
+      int minutes_until_timer2 = timer2_minutes - now_minutes;
+      if (minutes_until_timer2 <= 0) {
+        minutes_until_timer2 += 24 * 60; // Add a day if it's already passed
+      }
+      
+      // Determine which timer comes next
+      if (!id(morning_enabled) && !id(evening_enabled)) {
+        return std::string("No schedule active");
+      } else if (!id(morning_enabled)) {
+        // Only evening timer is enabled
+        std::string result = (minutes_until_timer2 > 12 * 60) ? "Tomorrow " : "Today ";
+        result += std::to_string(id(evening_hour)) + ":";
+        if (id(evening_minute) < 10)
+          result += "0";
+        result += std::to_string(id(evening_minute));
+        return result;
+      } else if (!id(evening_enabled)) {
+        // Only morning timer is enabled
+        std::string result = (minutes_until_timer1 > 12 * 60) ? "Tomorrow " : "Today ";
+        result += std::to_string(id(morning_hour)) + ":";
+        if (id(morning_minute) < 10)
+          result += "0";
+        result += std::to_string(id(morning_minute));
+        return result;
+      } else {
+        // Both timers are enabled - show whichever comes first
+        if (minutes_until_timer1 <= minutes_until_timer2) {
+          std::string result = (minutes_until_timer1 > 12 * 60) ? "Tomorrow " : "Today ";
+          result += std::to_string(id(morning_hour)) + ":";
+          if (id(morning_minute) < 10)
+            result += "0";
+          result += std::to_string(id(morning_minute));
+          return result;
+        } else {
+          std::string result = (minutes_until_timer2 > 12 * 60) ? "Tomorrow " : "Today ";
+          result += std::to_string(id(evening_hour)) + ":";
+          if (id(evening_minute) < 10)
+            result += "0";
+          result += std::to_string(id(evening_minute));
+          return result;
+        }
+      }
+
+
+# Scripts
+script:
+  - id: start_watering
+    then:
+      - lambda: |-
+          // Mark the watering as started and schedule end time
+          id(is_watering) = true;
+          id(watering_end_time) = millis()/1000 + (id(watering_duration) * 60);
+          id(should_stop_watering) = false;
+          
+          // Set absolute safety timeout (watering duration + 1 minute)
+          id(max_watering_timeout) = millis()/1000 + (id(watering_duration) * 60) + 60;
+          
+          ESP_LOGD("watering", "Starting watering for %0.1f minutes", (float)id(watering_duration));
+      - switch.turn_on: relay
+      # Start a short interval check instead of a single long delay
+      - script.execute: check_watering_status
+  
+  # This script runs periodically during watering to check if it should continue or be stopped
+  - id: check_watering_status
+    then:
+      - lambda: |-
+          // Get current time
+          uint32_t current_time = millis()/1000;
+          
+          // Calculate remaining time
+          int remaining_seconds = id(watering_end_time) - current_time;
+          
+          // Check multiple conditions that should trigger stop
+          bool should_stop = id(should_stop_watering) || 
+                             remaining_seconds <= 0 || 
+                             (current_time >= id(max_watering_timeout));
+          
+          // Check if we need to stop watering
+          if (should_stop) {
+            // End watering - set all flags to safe values
+            id(is_watering) = false;
+            id(should_stop_watering) = false;
+            
+            if (current_time >= id(max_watering_timeout)) {
+              ESP_LOGW("watering", "Safety timeout triggered! Emergency pump shutdown.");
+            } else {
+              ESP_LOGD("watering", "Watering ended - time remaining: %d seconds", remaining_seconds);
+            }
+          } else {
+            ESP_LOGD("watering", "Watering continues - time remaining: %d seconds", remaining_seconds);
+          }
+      
+      # Immediate safety check - always turn off the pump if any of these conditions are met
+      - if:
+          condition:
+            or:
+              - lambda: 'return !id(is_watering);'
+              - lambda: 'return millis()/1000 >= id(max_watering_timeout);'
+              - lambda: 'return id(watering_end_time) - millis()/1000 <= 0;'
+          then:
+            # Definitely turn off the pump if watering has ended
+            - switch.turn_off: relay
+            - logger.log: "Pump turned OFF"
+          else:
+            # Continue checking status at regular intervals
+            - delay: 3s  # Reduced from 5s to 3s for more frequent checking
+            - script.execute: check_watering_status
