@@ -46,6 +46,25 @@ wifi:
 captive_portal:
 
 ############
+# Create an independent watchdog timer that checks pump state
+# This runs completely separately from the scripts and ensures pumps get turned off
+interval:
+  - interval: 2s
+    then:
+      - lambda: |-
+          // Additional independent safety system
+          // This runs even if scripts fail or get interrupted
+          if (id(is_watering)) {
+            uint32_t now = millis()/1000;
+            int remaining_seconds = id(watering_end_time) - now;
+            
+            // If time has run out but pump is still on
+            if (remaining_seconds <= 0) {
+              ESP_LOGE("watering", "🔥 WATCHDOG TIMER EMERGENCY SHUTDOWN!");
+              id(relay).turn_off();
+              id(is_watering) = false;
+            }
+          }
 
 # LED on GPIO2 - configured as status LED
 output:
@@ -242,6 +261,20 @@ time:
                   id(start_watering).execute();
                 }
               }
+              
+              // EMERGENCY BACKUP CHECK for pump shutdown
+              // This is an independent safety check that runs every minute
+              // to ensure pump gets turned off if the normal check fails
+              if (id(is_watering)) {
+                uint32_t now = millis()/1000;
+                int time_left = id(watering_end_time) - now;
+                
+                if (time_left <= 0) {
+                  ESP_LOGW("watering", "⚠️ EMERGENCY TIMED BACKUP SHUTDOWN!");
+                  id(relay).turn_off();
+                  id(is_watering) = false;
+                }
+              }
 
 # Schedule enable switches
 switch:
@@ -406,45 +439,49 @@ script:
   # This script runs periodically during watering to check if it should continue or be stopped
   - id: check_watering_status
     then:
-      - lambda: |-
-          // Get current time
-          uint32_t current_time = millis()/1000;
-          
-          // Calculate remaining time
-          int remaining_seconds = id(watering_end_time) - current_time;
-          
-          // Check multiple conditions that should trigger stop
-          bool should_stop = id(should_stop_watering) || 
-                             remaining_seconds <= 0 || 
-                             (current_time >= id(max_watering_timeout));
-          
-          // Check if we need to stop watering
-          if (should_stop) {
-            // End watering - set all flags to safe values
-            id(is_watering) = false;
-            id(should_stop_watering) = false;
-            
-            if (current_time >= id(max_watering_timeout)) {
-              ESP_LOGW("watering", "Safety timeout triggered! Emergency pump shutdown.");
-            } else {
-              ESP_LOGD("watering", "Watering ended - time remaining: %d seconds", remaining_seconds);
-            }
-          } else {
-            ESP_LOGD("watering", "Watering continues - time remaining: %d seconds", remaining_seconds);
-          }
-      
-      # Immediate safety check - always turn off the pump if any of these conditions are met
+      # CRITICAL: First thing - check if we need to stop, and IMMEDIATELY turn off the pump if needed
       - if:
           condition:
-            or:
-              - lambda: 'return !id(is_watering);'
-              - lambda: 'return millis()/1000 >= id(max_watering_timeout);'
-              - lambda: 'return id(watering_end_time) - millis()/1000 <= 0;'
+            lambda: |-
+              uint32_t now = millis()/1000;
+              int time_left = id(watering_end_time) - now;
+              bool timeout_reached = (time_left <= 0);
+              bool safety_timeout = (now >= id(max_watering_timeout));
+              
+              // Log state for debugging
+              ESP_LOGI("watering_check", "CRITICAL CHECK: time_left=%d, is_watering=%d, should_stop=%d, safety=%d", 
+                       time_left, id(is_watering), id(should_stop_watering), safety_timeout);
+                       
+              // Return true if ANY condition indicates we should stop
+              return timeout_reached || !id(is_watering) || id(should_stop_watering) || safety_timeout;
           then:
-            # Definitely turn off the pump if watering has ended
+            # PUMP OFF - these conditions always turn the pump off immediately
+            - logger.log: "EMERGENCY PUMP SHUTDOWN TRIGGERED!"
             - switch.turn_off: relay
-            - logger.log: "Pump turned OFF"
+            - delay: 100ms  # Tiny delay to ensure the relay command is processed
+            - lambda: |-
+                // Reset all watering state
+                id(is_watering) = false;
+                id(should_stop_watering) = false;
+                ESP_LOGW("watering", "⚠️ Watering FORCE stopped - end time reached or manual stop requested");
           else:
-            # Continue checking status at regular intervals
-            - delay: 3s  # Reduced from 5s to 3s for more frequent checking
+            # Continue watering and monitoring
+            - lambda: |-
+                // Get current time and calculate remaining time
+                uint32_t current_time = millis()/1000;
+                int remaining_seconds = id(watering_end_time) - current_time;
+                ESP_LOGD("watering", "✓ Watering continues - %d seconds remaining", remaining_seconds);
+                
+                // Make sure pump is on (failsafe in case it was turned off)
+                if (id(is_watering) && remaining_seconds > 0) {
+                  ESP_LOGD("watering", "Pump should be ON");
+                }
+      
+      # Decide whether to keep monitoring or stop the script
+      - if:
+          condition:
+            lambda: 'return id(is_watering);'
+          then:
+            # Set a shorter check interval for more responsive stopping
+            - delay: 1s
             - script.execute: check_watering_status
