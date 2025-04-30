@@ -5,3 +5,12 @@ Small script to water Plants on a schedule with an Relais for a pump. Its nothin
 
 
 <img width="751" alt="image" src="https://github.com/user-attachments/assets/b50eb0ed-a168-4937-b3ae-e3eaa046b3c4" />
+
+## Data Persistence
+
+The system is designed with reliability in mind:
+
+- All watering schedule settings (times, duration, enabled status) are stored in flash memory and persist through device restarts and power outages
+- When the ESP restarts, it immediately loads saved settings from flash and sends them to Home Assistant
+- For safety, the pump always starts in the OFF state after any power loss event
+- Active watering states do not persist through power loss as a safety feature, preventing unexpected resumption of watering
