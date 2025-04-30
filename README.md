@@ -1,6 +1,8 @@
+## What
+
 Small script to water Plants on a schedule with an Relais for a pump. Its nothing else than a glorified timer for an USB pump.
 
-## Data Persistence
+## Overview
 
 The system is designed with reliability in mind:
 
