@@ -1,6 +1,6 @@
 ## What
 
-Small script to water Plants on a schedule with an Relais for a pump. Its nothing else than a glorified timer for an USB pump.
+Small script for ESP8266 Relais to water Plants on a schedule with an Relais for a pump. Its nothing else than a glorified timer for an USB pump.
 
 ## Overview
 
