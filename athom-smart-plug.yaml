@@ -47,11 +47,11 @@ esphome:
 # Global variables to store schedule settings between reboots
 
 globals:
-  # Duration in minutes
+  # Duration in seconds
   - id: action_duration
-    type: float
+    type: int
     restore_value: true
-    initial_value: '5.0'
+    initial_value: '300'  # 5 minutes default
   # Morning schedule time
   - id: morning_hour
     type: int
@@ -96,7 +96,7 @@ globals:
   - id: max_action_timeout
     type: int
     restore_value: false
-    initial_value: '600'  # 10 minutes absolute maximum
+    initial_value: '660'  # 11 minutes absolute maximum (600s + 60s safety buffer)
   # Water level detection
   - id: water_level_percent
     type: int
@@ -144,19 +144,19 @@ number:
     name: "Pump Timer Duration"
     id: duration_slider
     optimistic: true
-    min_value: 1
-    max_value: 30
-    step: 1
-    unit_of_measurement: "min"
+    min_value: 0
+    max_value: 600
+    step: 10
+    unit_of_measurement: "s"
     icon: "mdi:timer"
     restore_value: true
-    initial_value: 5
+    initial_value: 300
     entity_category: "config"
     set_action:
       then:
         - globals.set:
             id: action_duration
-            value: !lambda 'return x;'
+            value: !lambda 'return (int)x;'
 
 
 ################################################
@@ -478,6 +478,12 @@ script:
           // The Athom plug provides a sensor with id "power_sensor"
           float current_power = id(power_sensor).state;
           
+          // Check if power sensor reading is valid
+          if (isnan(current_power) || current_power < 0) {
+            ESP_LOGW("water_detection", "Invalid power reading: %.1f W - skipping water check", current_power);
+            return;
+          }
+          
           ESP_LOGD("water_detection", "Current power consumption: %.1f W", current_power);
           
           // Check if power is less than 5W (pump running dry)
@@ -500,13 +506,13 @@ script:
       - lambda: |-
           // Mark the action as started and schedule end time
           id(is_active) = true;
-          id(action_end_time) = millis()/1000 + (id(action_duration) * 60);
+          id(action_end_time) = millis()/1000 + id(action_duration);
           id(should_stop_action) = false;
           
-          // Set absolute safety timeout (duration + 1 minute)
-          id(max_action_timeout) = millis()/1000 + (id(action_duration) * 60) + 60;
+          // Set absolute safety timeout (duration + 60 seconds)
+          id(max_action_timeout) = millis()/1000 + id(action_duration) + 60;
           
-          ESP_LOGD("scheduler", "Starting scheduled action for %0.1f minutes", (float)id(action_duration));
+          ESP_LOGD("scheduler", "Starting scheduled action for %d seconds", id(action_duration));
       - switch.turn_on: relay
       # Wait 5 seconds for pump to start and stabilize
       - delay: 5s
