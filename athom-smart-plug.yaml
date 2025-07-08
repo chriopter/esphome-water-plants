@@ -220,10 +220,41 @@ text:
 
 
 ################################################
-# SCHEDULER ADDON - SCHEDULE ENABLE SWITCHES
+# SCHEDULER ADDON - MAIN SWITCH OVERRIDE
 ################################################
+# Override the main switch to add timer functionality when manually turned on
 
 switch:
+  # Override the main relay switch to add timer functionality
+  - platform: gpio
+    pin: GPIO5
+    id: relay
+    name: "Pump"
+    icon: "mdi:water-pump"
+    restore_mode: ALWAYS_OFF
+    on_turn_on:
+      then:
+        - lambda: |-
+            // Only start timer if not already active (prevents double-triggering)
+            if (!id(is_active)) {
+              ESP_LOGD("scheduler", "Main switch turned on - starting timer");
+              id(start_scheduled_action).execute();
+            }
+    on_turn_off:
+      then:
+        - lambda: |-
+            // Stop timer if it's running
+            if (id(is_active)) {
+              ESP_LOGD("scheduler", "Main switch turned off - stopping timer");
+              id(should_stop_action) = true;
+              id(is_active) = false;
+              id(action_end_time) = 0;
+            }
+
+
+################################################
+# SCHEDULER ADDON - SCHEDULE ENABLE SWITCHES
+################################################
   - platform: template
     name: "Pump Morning Schedule Enabled"
     id: morning_switch
@@ -276,42 +307,6 @@ sensor:
     entity_category: "diagnostic"
     lambda: |-
       return id(water_level_percent);
-  # Timer remaining time in minutes (for compatibility)
-  - platform: template
-    name: "Pump Timer Remaining Minutes"
-    id: remaining_minutes
-    unit_of_measurement: "min"
-    icon: "mdi:timer-outline"
-    update_interval: 1s
-    entity_category: "diagnostic"
-    accuracy_decimals: 1
-    lambda: |-
-      if (!id(is_active)) {
-        return 0;
-      }
-      int remaining_seconds = id(action_end_time) - millis()/1000;
-      if (remaining_seconds <= 0) {
-        return 0;
-      }
-      return remaining_seconds / 60.0;
-  
-  # Timer remaining time in seconds
-  - platform: template
-    name: "Pump Timer Remaining Seconds"
-    id: remaining_seconds_sensor
-    unit_of_measurement: "s"
-    icon: "mdi:timer-sand"
-    update_interval: 1s
-    entity_category: "diagnostic"
-    lambda: |-
-      if (!id(is_active)) {
-        return 0;
-      }
-      int remaining_seconds = id(action_end_time) - millis()/1000;
-      if (remaining_seconds <= 0) {
-        return 0;
-      }
-      return remaining_seconds;
 
 text_sensor:
   # Timer remaining time as MM:SS format

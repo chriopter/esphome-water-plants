@@ -11,6 +11,12 @@ The system is designed with reliability in mind:
 - For safety, the pump always starts in the OFF state after any power loss event
 - Active watering states do not persist through power loss as a safety feature, preventing unexpected resumption of watering
 
+
+## Athom Smart Plug
+
+Version for Athom Smart Plug if you want to drive a bigger pump than USB powered ones.
+Detects if the pump does not draw power and turns off, reports this as Water Level (Float Switch).
+
 <img width="750" alt="image" src="https://github.com/user-attachments/assets/95adeb32-332c-4523-83b8-9b6bc461d64d" />
 
 
@@ -18,6 +24,4 @@ The system is designed with reliability in mind:
 
 
 <img width="750" alt="image" src="https://github.com/user-attachments/assets/b50eb0ed-a168-4937-b3ae-e3eaa046b3c4" />
-
-
 
