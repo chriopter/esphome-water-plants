@@ -220,41 +220,10 @@ text:
 
 
 ################################################
-# SCHEDULER ADDON - MAIN SWITCH OVERRIDE
-################################################
-# Override the main switch to add timer functionality when manually turned on
-
-switch:
-  # Override the main relay switch to add timer functionality
-  - platform: gpio
-    pin: GPIO5
-    id: relay
-    name: "Pump"
-    icon: "mdi:water-pump"
-    restore_mode: ALWAYS_OFF
-    on_turn_on:
-      then:
-        - lambda: |-
-            // Only start timer if not already active (prevents double-triggering)
-            if (!id(is_active)) {
-              ESP_LOGD("scheduler", "Main switch turned on - starting timer");
-              id(start_scheduled_action).execute();
-            }
-    on_turn_off:
-      then:
-        - lambda: |-
-            // Stop timer if it's running
-            if (id(is_active)) {
-              ESP_LOGD("scheduler", "Main switch turned off - stopping timer");
-              id(should_stop_action) = true;
-              id(is_active) = false;
-              id(action_end_time) = 0;
-            }
-
-
-################################################
 # SCHEDULER ADDON - SCHEDULE ENABLE SWITCHES
 ################################################
+
+switch:
   - platform: template
     name: "Pump Morning Schedule Enabled"
     id: morning_switch
@@ -395,6 +364,38 @@ text_sensor:
           return result;
         }
       }
+
+
+################################################
+# SCHEDULER ADDON - RELAY STATE MONITORING
+################################################
+# Monitor the main relay switch to start timer when manually turned on
+
+binary_sensor:
+  - platform: template
+    name: "Pump Relay State Monitor"
+    id: relay_monitor
+    internal: true
+    lambda: |-
+      return id(relay).state;
+    on_press:
+      then:
+        - lambda: |-
+            // Only start timer if not already active (prevents double-triggering)
+            if (!id(is_active)) {
+              ESP_LOGD("scheduler", "Main relay turned on - starting timer");
+              id(start_scheduled_action).execute();
+            }
+    on_release:
+      then:
+        - lambda: |-
+            // Stop timer if it's running
+            if (id(is_active)) {
+              ESP_LOGD("scheduler", "Main relay turned off - stopping timer");
+              id(should_stop_action) = true;
+              id(is_active) = false;
+              id(action_end_time) = 0;
+            }
 
 
 ################################################
