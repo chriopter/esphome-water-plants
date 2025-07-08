@@ -505,6 +505,9 @@ script:
   - id: start_scheduled_action
     then:
       - lambda: |-
+          // Check if relay is already on (manual activation)
+          bool relay_already_on = id(relay).state;
+          
           // Mark the action as started and schedule end time
           id(is_active) = true;
           id(action_end_time) = millis()/1000 + id(action_duration);
@@ -514,7 +517,11 @@ script:
           id(max_action_timeout) = millis()/1000 + id(action_duration) + 60;
           
           ESP_LOGD("scheduler", "Starting scheduled action for %d seconds", id(action_duration));
-      - switch.turn_on: relay
+          
+          // Only turn on relay if it's not already on
+          if (!relay_already_on) {
+            id(relay).turn_on();
+          }
       # Wait 5 seconds for pump to start and stabilize
       - delay: 5s
       # Check water level based on power consumption
