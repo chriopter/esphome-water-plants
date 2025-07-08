@@ -107,7 +107,7 @@ globals:
 button:
   # Manual start button
   - platform: template
-    name: "Start Manual Timer"
+    name: "Pump Start Manual Timer"
     icon: "mdi:play"
     entity_category: "config"
     on_press:
@@ -115,7 +115,7 @@ button:
         - script.execute: start_scheduled_action
   # Stop button
   - platform: template
-    name: "Stop Timer"
+    name: "Pump Stop Timer"
     icon: "mdi:stop"
     entity_category: "config"
     on_press:
@@ -136,7 +136,7 @@ button:
 
 number:
   - platform: template
-    name: "Timer Duration"
+    name: "Pump Timer Duration"
     id: duration_slider
     optimistic: true
     min_value: 1
@@ -160,7 +160,7 @@ number:
 
 text:
   - platform: template
-    name: "Morning Schedule Time"
+    name: "Pump Morning Schedule Time"
     id: morning_time_text
     optimistic: true
     icon: "mdi:clock-time-eight"
@@ -187,7 +187,7 @@ text:
             }
 
   - platform: template
-    name: "Evening Schedule Time"
+    name: "Pump Evening Schedule Time"
     id: evening_time_text
     optimistic: true
     icon: "mdi:clock-time-six"
@@ -220,7 +220,7 @@ text:
 
 switch:
   - platform: template
-    name: "Morning Schedule Enabled"
+    name: "Pump Morning Schedule Enabled"
     id: morning_switch
     optimistic: true
     restore_mode: RESTORE_DEFAULT_ON
@@ -238,7 +238,7 @@ switch:
       return id(morning_enabled);
 
   - platform: template
-    name: "Evening Schedule Enabled"
+    name: "Pump Evening Schedule Enabled"
     id: evening_switch
     optimistic: true
     restore_mode: RESTORE_DEFAULT_ON
@@ -263,7 +263,7 @@ switch:
 sensor:
   # Timer remaining time in minutes (for compatibility)
   - platform: template
-    name: "Timer Remaining Minutes"
+    name: "Pump Timer Remaining Minutes"
     id: remaining_minutes
     unit_of_measurement: "min"
     icon: "mdi:timer-outline"
@@ -282,7 +282,7 @@ sensor:
   
   # Timer remaining time in seconds
   - platform: template
-    name: "Timer Remaining Seconds"
+    name: "Pump Timer Remaining Seconds"
     id: remaining_seconds_sensor
     unit_of_measurement: "s"
     icon: "mdi:timer-sand"
@@ -301,7 +301,7 @@ sensor:
 text_sensor:
   # Timer remaining time as MM:SS format
   - platform: template
-    name: "Timer Remaining Time"
+    name: "Pump Timer Remaining Time"
     id: remaining_time_text
     icon: "mdi:timer"
     update_interval: 1s
@@ -321,7 +321,7 @@ text_sensor:
       return std::string(buffer);
   
   - platform: template
-    name: "Next Scheduled Action"
+    name: "Pump Next Scheduled Action"
     id: next_scheduled_action
     update_interval: 10s
     icon: "mdi:calendar-clock"
