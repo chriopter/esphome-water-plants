@@ -370,13 +370,15 @@ binary_sensor:
     icon: "mdi:water"
     entity_category: "diagnostic"
     lambda: |-
-      // Only report "no water" if pump has been running (is_active)
-      // This prevents false reports during short pump activations
-      if (!id(is_active)) {
-        // Pump not running long enough - assume water is OK
-        return true;
+      // If pump was just shut down due to no water, show dry state
+      if (!id(is_active) && !id(water_detected)) {
+        // Pump stopped because no water was detected
+        return false;  // Show "Dry"
+      } else if (!id(is_active)) {
+        // Pump not running or stopped normally - assume water is OK
+        return true;   // Show "Wet"
       } else {
-        // Pump has been running - return actual detection state
+        // Pump is running - show actual detection state
         return id(water_detected);
       }
   
