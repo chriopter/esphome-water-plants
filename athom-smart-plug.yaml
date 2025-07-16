@@ -370,17 +370,7 @@ binary_sensor:
     icon: "mdi:water"
     entity_category: "diagnostic"
     lambda: |-
-      // If pump was just shut down due to no water, show dry state
-      if (!id(is_active) && !id(water_detected)) {
-        // Pump stopped because no water was detected
-        return false;  // Show "Dry"
-      } else if (!id(is_active)) {
-        // Pump not running or stopped normally - assume water is OK
-        return true;   // Show "Wet"
-      } else {
-        // Pump is running - show actual detection state
-        return id(water_detected);
-      }
+      return id(water_detected);
   
   - platform: template
     name: "Pump Relay State Monitor"
@@ -532,8 +522,8 @@ script:
           if (!relay_already_on) {
             id(relay).turn_on();
           }
-      # Wait 5 seconds for pump to start and stabilize
-      - delay: 5s
+      # Wait 1 second for pump to start and stabilize
+      - delay: 1s
       # Check water level based on power consumption
       - script.execute: check_water_level
       # Start a short interval check instead of a single long delay
