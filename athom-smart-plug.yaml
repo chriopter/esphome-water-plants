@@ -366,7 +366,8 @@ binary_sensor:
   - platform: template
     name: "Pump Water Detected"
     id: water_detected_sensor
-    icon: "mdi:water-check"
+    device_class: moisture
+    icon: "mdi:water"
     entity_category: "diagnostic"
     lambda: |-
       // Only report "no water" if pump has been running (is_active)
