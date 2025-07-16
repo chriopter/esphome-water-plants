@@ -530,8 +530,8 @@ script:
           if (!relay_already_on) {
             id(relay).turn_on();
           }
-      # Wait 1 second for pump to start and stabilize
-      - delay: 1s
+      # Wait 5 seconds for pump to start and stabilize
+      - delay: 5s
       # Check water level based on power consumption (sets state only)
       - script.execute: check_water_level
       # Wait another second before taking action
