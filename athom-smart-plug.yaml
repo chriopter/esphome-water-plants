@@ -491,15 +491,23 @@ script:
           if (current_power < 5.0) {
             id(water_detected) = false;
             ESP_LOGW("water_detection", "⚠️ NO WATER DETECTED! Power: %.1f W", current_power);
-            
-            // Emergency shutdown if no water
+          } else {
+            id(water_detected) = true;
+            ESP_LOGI("water_detection", "✓ Water detected. Power: %.1f W", current_power);
+          }
+  
+  # Script to shutdown pump if no water detected
+  - id: check_and_shutdown_if_dry
+    then:
+      - lambda: |-
+          // Only shutdown if water was not detected
+          if (!id(water_detected)) {
             ESP_LOGE("water_detection", "🚨 EMERGENCY SHUTDOWN - NO WATER!");
             id(relay).turn_off();
             id(is_active) = false;
             id(should_stop_action) = true;
           } else {
-            id(water_detected) = true;
-            ESP_LOGI("water_detection", "✓ Water detected. Power: %.1f W", current_power);
+            ESP_LOGD("water_detection", "Water check passed - continuing operation");
           }
   
   - id: start_scheduled_action
@@ -524,8 +532,12 @@ script:
           }
       # Wait 1 second for pump to start and stabilize
       - delay: 1s
-      # Check water level based on power consumption
+      # Check water level based on power consumption (sets state only)
       - script.execute: check_water_level
+      # Wait another second before taking action
+      - delay: 1s
+      # Now shutdown if dry
+      - script.execute: check_and_shutdown_if_dry
       # Start a short interval check instead of a single long delay
       - script.execute: check_action_status
   
