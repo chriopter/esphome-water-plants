@@ -4,6 +4,10 @@
 # This section loads the standard Athom Smart Plug package
 # which includes: relay control, power monitoring, physical button, LED, etc.
 
+substitutions:
+  name: Pump
+  friendly_name: Pump
+
 packages:
   Athom_Technology.Smart_Plug_V3: github://athom-tech/esp32-configs/athom-smart-plug.yaml
 
@@ -14,8 +18,9 @@ packages:
 # Everything below this line adds scheduling functionality to the smart plug
 
 esphome:
-  name: athom-smart-plug-scheduler
-  friendly_name: Smart Plug with Scheduler
+  name: ${name}
+  name_add_mac_suffix: false
+  friendly_name: ${friendly_name}
   on_boot:
     priority: 600
     then:
@@ -420,6 +425,18 @@ time:
                 // If time has run out but plug is still on
                 if (remaining_seconds <= 0) {
                   ESP_LOGE("scheduler", "🔥 WATCHDOG TIMER EMERGENCY SHUTDOWN!");
+                  
+                  // Update water detection status before shutdown
+                  if (id(power_exceeded_10w)) {
+                    id(water_detected) = true;
+                    id(water_detected_sensor).publish_state(true);
+                    ESP_LOGI("water_detection", "✓ Water detected (watchdog shutdown)");
+                  } else {
+                    id(water_detected) = false;
+                    id(water_detected_sensor).publish_state(false);
+                    ESP_LOGW("water_detection", "⚠️ NO WATER (watchdog shutdown)");
+                  }
+                  
                   id(relay).turn_off();
                   id(is_active) = false;
                 }
@@ -505,6 +522,7 @@ script:
   
   # This script runs periodically during active timer to check if it should continue or be stopped
   - id: check_action_status
+    mode: restart  # Allow script to restart itself for continuous monitoring
     then:
       # CRITICAL: First thing - check if we need to stop, and IMMEDIATELY turn off the plug if needed
       - if:
