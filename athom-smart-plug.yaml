@@ -33,14 +33,6 @@ esphome:
           ESP_LOGI("scheduler", "Initialized time fields: Morning %s, Evening %s", 
                    morning_time, evening_time);
 
-
-################################################
-# SCHEDULER ADDON - SAFETY SYSTEMS  
-################################################
-# Independent watchdog timer to ensure plug turns off even if scripts fail
-# Note: This is moved to the time platform to avoid conflicts with the package
-
-
 ################################################
 # SCHEDULER ADDON - PERSISTENT STORAGE
 ################################################
@@ -102,6 +94,11 @@ globals:
     type: bool
     restore_value: true
     initial_value: 'true'
+  # Track if power exceeded 10W during monitoring period
+  - id: power_exceeded_10w
+    type: bool
+    restore_value: false
+    initial_value: 'false'
 
 
 ################################################
@@ -428,6 +425,13 @@ time:
                 }
               }
       
+      # Update water detection sensor every second
+      - seconds: /1
+        then:
+          - lambda: |-
+              // Force update the water detection sensor
+              id(water_detected_sensor).publish_state(id(water_detected));
+      
       # Check every minute if action should start
       - seconds: 0
         minutes: /1
@@ -471,44 +475,6 @@ time:
 ################################################
 
 script:
-  # Check water level based on power consumption
-  - id: check_water_level
-    then:
-      - lambda: |-
-          // Get current power consumption from the Athom power sensor
-          // The Athom plug provides a sensor with id "power_sensor"
-          float current_power = id(power_sensor).state;
-          
-          // Check if power sensor reading is valid
-          if (isnan(current_power) || current_power < 0) {
-            ESP_LOGW("water_detection", "Invalid power reading: %.1f W - skipping water check", current_power);
-            return;
-          }
-          
-          ESP_LOGD("water_detection", "Current power consumption: %.1f W", current_power);
-          
-          // Check if power is less than 5W (pump running dry)
-          if (current_power < 5.0) {
-            id(water_detected) = false;
-            ESP_LOGW("water_detection", "⚠️ NO WATER DETECTED! Power: %.1f W", current_power);
-          } else {
-            id(water_detected) = true;
-            ESP_LOGI("water_detection", "✓ Water detected. Power: %.1f W", current_power);
-          }
-  
-  # Script to shutdown pump if no water detected
-  - id: check_and_shutdown_if_dry
-    then:
-      - lambda: |-
-          // Only shutdown if water was not detected
-          if (!id(water_detected)) {
-            ESP_LOGE("water_detection", "🚨 EMERGENCY SHUTDOWN - NO WATER!");
-            id(relay).turn_off();
-            id(is_active) = false;
-            id(should_stop_action) = true;
-          } else {
-            ESP_LOGD("water_detection", "Water check passed - continuing operation");
-          }
   
   - id: start_scheduled_action
     then:
@@ -524,20 +490,16 @@ script:
           // Set absolute safety timeout (duration + 60 seconds)
           id(max_action_timeout) = millis()/1000 + id(action_duration) + 60;
           
+          // Reset water detection flag at start
+          id(power_exceeded_10w) = false;
+          ESP_LOGI("water_detection", "Starting pump - monitoring power consumption...");
+          
           ESP_LOGD("scheduler", "Starting scheduled action for %d seconds", id(action_duration));
           
           // Only turn on relay if it's not already on
           if (!relay_already_on) {
             id(relay).turn_on();
           }
-      # Wait 5 seconds for pump to start and stabilize
-      - delay: 5s
-      # Check water level based on power consumption (sets state only)
-      - script.execute: check_water_level
-      # Wait another second before taking action
-      - delay: 1s
-      # Now shutdown if dry
-      - script.execute: check_and_shutdown_if_dry
       # Start a short interval check instead of a single long delay
       - script.execute: check_action_status
   
@@ -569,6 +531,17 @@ script:
                 id(is_active) = false;
                 id(should_stop_action) = false;
                 ESP_LOGW("scheduler", "⚠️ Timer FORCE stopped - end time reached or manual stop requested");
+                
+                // Final water detection result
+                if (id(power_exceeded_10w)) {
+                  id(water_detected) = true;
+                  id(water_detected_sensor).publish_state(true);
+                  ESP_LOGI("water_detection", "✓ Water detected - power exceeded 10W during pump run");
+                } else {
+                  id(water_detected) = false;
+                  id(water_detected_sensor).publish_state(false);
+                  ESP_LOGW("water_detection", "⚠️ NO WATER - power never exceeded 10W during entire pump run");
+                }
           else:
             # Continue timer and monitoring
             - lambda: |-
@@ -577,12 +550,24 @@ script:
                 int remaining_seconds = id(action_end_time) - current_time;
                 ESP_LOGD("scheduler", "✓ Timer continues - %d seconds remaining", remaining_seconds);
                 
+                // Check power consumption continuously
+                float current_power = id(power_sensor).state;
+                if (!isnan(current_power) && current_power >= 0) {
+                  ESP_LOGD("water_detection", "Power reading: %.1f W", current_power);
+                  
+                  // Check if power exceeded 10W
+                  if (current_power > 10.0 && !id(power_exceeded_10w)) {
+                    id(power_exceeded_10w) = true;
+                    id(water_detected) = true;
+                    id(water_detected_sensor).publish_state(true);
+                    ESP_LOGI("water_detection", "Power exceeded 10W: %.1f W - Water detected!", current_power);
+                  }
+                }
+                
                 // Make sure plug is on (failsafe in case it was turned off)
                 if (id(is_active) && remaining_seconds > 0) {
                   ESP_LOGD("scheduler", "Plug should be ON");
                 }
-            # Check water level periodically during operation
-            - script.execute: check_water_level
       
       # Decide whether to keep monitoring or stop the script
       - if:
